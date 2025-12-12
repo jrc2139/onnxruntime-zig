@@ -149,15 +149,13 @@ pub fn build(b: *std.Build) void {
 fn linkStaticOnnxRuntime(mod: *std.Build.Module, abseil_path: std.Build.LazyPath, is_macos: bool) void {
     _ = abseil_path; // Combined library includes abseil
 
-    // Link the combined static library (includes ORT, abseil, protobuf, RE2, etc.)
-    // Created by: libtool -static -o libonnxruntime_all.a *.a
+    // Link the combined static library (includes ORT, abseil, protobuf, RE2, libc++, libc++abi, etc.)
+    // Created by: ar -M with MRI script combining all .a files
     mod.linkSystemLibrary("onnxruntime_all", .{ .preferred_link_mode = .static });
 
-    // Link C++ standard library (libc++ - must match ONNX Runtime build)
-    // ONNX Runtime is built with clang -stdlib=libc++, so we must link libc++ not libstdc++
-    mod.linkSystemLibrary("c++", .{});
-    if (!is_macos) {
-        // On Linux, libc++ also needs libc++abi
-        mod.linkSystemLibrary("c++abi", .{});
+    // On macOS, link system libc++ (not bundled in static lib)
+    // On Linux, libc++ and libc++abi are bundled in the static library
+    if (is_macos) {
+        mod.linkSystemLibrary("c++", .{});
     }
 }
