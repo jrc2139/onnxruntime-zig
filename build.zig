@@ -153,10 +153,11 @@ fn linkStaticOnnxRuntime(mod: *std.Build.Module, abseil_path: std.Build.LazyPath
     // Created by: libtool -static -o libonnxruntime_all.a *.a
     mod.linkSystemLibrary("onnxruntime_all", .{ .preferred_link_mode = .static });
 
-    // Link C++ standard library
-    if (is_macos) {
-        mod.linkSystemLibrary("c++", .{});
-    } else {
-        mod.linkSystemLibrary("stdc++", .{ .preferred_link_mode = .static });
+    // Link C++ standard library (libc++ - must match ONNX Runtime build)
+    // ONNX Runtime is built with clang -stdlib=libc++, so we must link libc++ not libstdc++
+    mod.linkSystemLibrary("c++", .{});
+    if (!is_macos) {
+        // On Linux, libc++ also needs libc++abi
+        mod.linkSystemLibrary("c++abi", .{});
     }
 }
