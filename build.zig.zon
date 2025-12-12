@@ -9,4 +9,6 @@
         "src",
         "examples",
     },
+    // Dependencies managed by zigmod - keep empty to avoid conflicts
+    .dependencies = .{},
 }
