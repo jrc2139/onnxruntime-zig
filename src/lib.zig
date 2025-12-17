@@ -51,6 +51,11 @@ pub const SessionOptions = @import("session.zig").SessionOptions;
 pub const GraphOptLevel = @import("session.zig").GraphOptLevel;
 pub const Tensor = @import("tensor.zig").Tensor;
 
+// Zero-allocation inference API
+pub const IoBinding = @import("io_binding.zig").IoBinding;
+pub const RunOptions = @import("run_options.zig").RunOptions;
+pub const MemoryInfo = @import("memory_info.zig").MemoryInfo;
+
 // Re-export commonly used types from c_api
 pub const OrtError = errors.OrtError;
 pub const TensorElementType = c_api.TensorElementType;

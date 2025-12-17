@@ -20,6 +20,7 @@ pub const OrtStatus = c.OrtStatus;
 pub const OrtRunOptions = c.OrtRunOptions;
 pub const OrtTypeInfo = c.OrtTypeInfo;
 pub const OrtTensorTypeAndShapeInfo = c.OrtTensorTypeAndShapeInfo;
+pub const OrtIoBinding = c.OrtIoBinding;
 
 // Enums
 pub const OrtErrorCode = c.OrtErrorCode;
