@@ -22,6 +22,14 @@ pub const OrtTypeInfo = c.OrtTypeInfo;
 pub const OrtTensorTypeAndShapeInfo = c.OrtTensorTypeAndShapeInfo;
 pub const OrtIoBinding = c.OrtIoBinding;
 
+/// Callback function type for RunAsync
+pub const RunAsyncCallbackFn = *const fn (
+    user_data: ?*anyopaque,
+    outputs: [*c]?*OrtValue,
+    num_outputs: usize,
+    status: ?*OrtStatus,
+) callconv(.c) void;
+
 // Enums
 pub const OrtErrorCode = c.OrtErrorCode;
 pub const OrtLoggingLevel = c.OrtLoggingLevel;

@@ -49,6 +49,8 @@ pub const Environment = @import("env.zig").Environment;
 pub const Session = @import("session.zig").Session;
 pub const SessionOptions = @import("session.zig").SessionOptions;
 pub const GraphOptLevel = @import("session.zig").GraphOptLevel;
+pub const AsyncCallback = Session.AsyncCallback;
+pub const AsyncResult = Session.AsyncResult;
 pub const Tensor = @import("tensor.zig").Tensor;
 
 // Zero-allocation inference API

@@ -8,6 +8,7 @@ const c_api = @import("c_api.zig");
 const errors = @import("errors.zig");
 const env_mod = @import("env.zig");
 const tensor_mod = @import("tensor.zig");
+const run_options_mod = @import("run_options.zig");
 
 const OrtError = errors.OrtError;
 const Environment = env_mod.Environment;
@@ -219,6 +220,166 @@ pub const Session = struct {
         }
 
         return outputs;
+    }
+
+    /// Callback type for async inference
+    pub const AsyncCallback = *const fn (
+        user_data: ?*anyopaque,
+        result: AsyncResult,
+    ) void;
+
+    /// Result of async inference
+    pub const AsyncResult = union(enum) {
+        /// Successful inference with output tensors
+        success: []Tensor,
+        /// Inference failed with error
+        err: OrtError,
+    };
+
+    /// Context passed through C callback
+    const AsyncContext = struct {
+        callback: AsyncCallback,
+        user_data: ?*anyopaque,
+        api: *const c_api.OrtApi,
+        allocator: std.mem.Allocator,
+        num_outputs: usize,
+        // Arrays that must live until callback completes
+        input_ptrs: []*c_api.OrtValue,
+        input_name_ptrs: [][*c]const u8,
+        output_name_ptrs: [][*c]const u8,
+        output_ptrs: []?*c_api.OrtValue,
+    };
+
+    /// C-compatible trampoline that converts to Zig callback
+    fn asyncTrampoline(
+        ctx_ptr: ?*anyopaque,
+        outputs: [*c]?*c_api.OrtValue,
+        num_outputs: usize,
+        status: ?*c_api.OrtStatus,
+    ) callconv(.c) void {
+        const ctx: *AsyncContext = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            // Free all allocated arrays
+            ctx.allocator.free(ctx.input_ptrs);
+            ctx.allocator.free(ctx.input_name_ptrs);
+            ctx.allocator.free(ctx.output_name_ptrs);
+            ctx.allocator.free(ctx.output_ptrs);
+            ctx.allocator.destroy(ctx);
+        }
+
+        // Check for errors
+        if (status) |s| {
+            const code = ctx.api.GetErrorCode.?(s);
+            ctx.api.ReleaseStatus.?(s);
+
+            const ort_err: OrtError = switch (code) {
+                c_api.c.ORT_FAIL => OrtError.Fail,
+                c_api.c.ORT_INVALID_ARGUMENT => OrtError.InvalidArgument,
+                c_api.c.ORT_NO_SUCHFILE => OrtError.NoSuchFile,
+                c_api.c.ORT_NO_MODEL => OrtError.NoModel,
+                c_api.c.ORT_ENGINE_ERROR => OrtError.EngineError,
+                c_api.c.ORT_RUNTIME_EXCEPTION => OrtError.RuntimeException,
+                c_api.c.ORT_INVALID_PROTOBUF => OrtError.InvalidProtobuf,
+                c_api.c.ORT_MODEL_LOADED => OrtError.ModelLoaded,
+                c_api.c.ORT_NOT_IMPLEMENTED => OrtError.NotImplemented,
+                c_api.c.ORT_INVALID_GRAPH => OrtError.InvalidGraph,
+                c_api.c.ORT_EP_FAIL => OrtError.ExecutionProviderFail,
+                else => OrtError.Unknown,
+            };
+            ctx.callback(ctx.user_data, .{ .err = ort_err });
+            return;
+        }
+
+        // Wrap outputs in Tensor structs
+        const tensor_outputs = ctx.allocator.alloc(Tensor, num_outputs) catch {
+            ctx.callback(ctx.user_data, .{ .err = OrtError.Fail });
+            return;
+        };
+
+        for (0..num_outputs) |i| {
+            tensor_outputs[i] = Tensor{
+                .ptr = outputs[i].?,
+                .api = ctx.api,
+                .owns_data = true,
+            };
+        }
+
+        ctx.callback(ctx.user_data, .{ .success = tensor_outputs });
+    }
+
+    /// Run inference asynchronously
+    ///
+    /// The callback will be invoked when inference completes (or fails).
+    /// On success, caller is responsible for freeing outputs (deinit each, then free slice).
+    pub fn runAsync(
+        self: Self,
+        inputs: []const Tensor,
+        run_options: ?*run_options_mod.RunOptions,
+        callback: AsyncCallback,
+        user_data: ?*anyopaque,
+    ) OrtError!void {
+        if (inputs.len != self.input_names.len) {
+            return OrtError.InvalidArgument;
+        }
+
+        // Allocate context (freed in trampoline)
+        const ctx = self.zig_allocator.create(AsyncContext) catch return OrtError.Fail;
+        errdefer self.zig_allocator.destroy(ctx);
+
+        // Allocate arrays that must persist until callback
+        const input_ptrs = self.zig_allocator.alloc(*c_api.OrtValue, inputs.len) catch return OrtError.Fail;
+        errdefer self.zig_allocator.free(input_ptrs);
+
+        const input_name_ptrs = self.zig_allocator.alloc([*c]const u8, self.input_names.len) catch return OrtError.Fail;
+        errdefer self.zig_allocator.free(input_name_ptrs);
+
+        const output_name_ptrs = self.zig_allocator.alloc([*c]const u8, self.output_names.len) catch return OrtError.Fail;
+        errdefer self.zig_allocator.free(output_name_ptrs);
+
+        const output_ptrs = self.zig_allocator.alloc(?*c_api.OrtValue, self.output_names.len) catch return OrtError.Fail;
+        errdefer self.zig_allocator.free(output_ptrs);
+
+        // Fill arrays
+        for (inputs, 0..) |input, i| {
+            input_ptrs[i] = input.getPtr();
+        }
+        for (self.input_names, 0..) |name, i| {
+            input_name_ptrs[i] = name.ptr;
+        }
+        for (self.output_names, 0..) |name, i| {
+            output_name_ptrs[i] = name.ptr;
+        }
+        @memset(output_ptrs, null);
+
+        // Fill context
+        ctx.* = .{
+            .callback = callback,
+            .user_data = user_data,
+            .api = self.api,
+            .allocator = self.zig_allocator,
+            .num_outputs = self.output_names.len,
+            .input_ptrs = input_ptrs,
+            .input_name_ptrs = input_name_ptrs,
+            .output_name_ptrs = output_name_ptrs,
+            .output_ptrs = output_ptrs,
+        };
+
+        const opts_ptr: ?*c_api.OrtRunOptions = if (run_options) |ro| ro.ptr else null;
+
+        // Call RunAsync
+        const status = self.api.RunAsync.?(
+            self.ptr,
+            opts_ptr,
+            input_name_ptrs.ptr,
+            @ptrCast(input_ptrs.ptr),
+            inputs.len,
+            output_name_ptrs.ptr,
+            self.output_names.len,
+            @ptrCast(output_ptrs.ptr),
+            asyncTrampoline,
+            ctx,
+        );
+        try errors.checkStatus(self.api, status);
     }
 
     /// Get the number of inputs

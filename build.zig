@@ -212,6 +212,47 @@ pub fn build(b: *std.Build) void {
     run_benchmark_step.dependOn(&run_benchmark.step);
 
     // -------------------------------------------------------------------------
+    // Example: Async Inference
+    // -------------------------------------------------------------------------
+    const async_example = b.addExecutable(.{
+        .name = "async_inference",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/async_inference.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "onnxruntime", .module = ort_mod },
+            },
+        }),
+    });
+    async_example.root_module.addIncludePath(ort_include_path);
+    async_example.root_module.addLibraryPath(ort_lib_path);
+
+    if (use_static) {
+        linkStaticOnnxRuntime(async_example.root_module, ort_abseil_path, target.result.os.tag == .macos);
+    } else {
+        async_example.root_module.linkSystemLibrary("onnxruntime", .{});
+        async_example.root_module.addRPath(ort_lib_path);
+    }
+    async_example.root_module.link_libc = true;
+
+    if (target.result.os.tag == .macos) {
+        async_example.root_module.linkFramework("Foundation", .{});
+    }
+
+    b.installArtifact(async_example);
+
+    const run_async = b.addRunArtifact(async_example);
+    run_async.step.dependOn(b.getInstallStep());
+
+    if (b.args) |args| {
+        run_async.addArgs(args);
+    }
+
+    const run_async_step = b.step("run-async", "Run the async inference example");
+    run_async_step.dependOn(&run_async.step);
+
+    // -------------------------------------------------------------------------
     // Check (for ZLS)
     // -------------------------------------------------------------------------
     const check = b.addTest(.{
