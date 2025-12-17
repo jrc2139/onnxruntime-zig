@@ -65,7 +65,7 @@ pub const TensorElementType = enum(c_int) {
     bfloat16 = c.ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16,
 
     pub fn toC(self: TensorElementType) ONNXTensorElementDataType {
-        return @enumFromInt(@intFromEnum(self));
+        return @intCast(@intFromEnum(self));
     }
 };
 
