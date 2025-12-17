@@ -130,6 +130,88 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_example.step);
 
     // -------------------------------------------------------------------------
+    // Example: Zero-Alloc Inference (IoBinding)
+    // -------------------------------------------------------------------------
+    const zero_alloc_example = b.addExecutable(.{
+        .name = "zero_alloc_inference",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/zero_alloc_inference.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "onnxruntime", .module = ort_mod },
+            },
+        }),
+    });
+    zero_alloc_example.root_module.addIncludePath(ort_include_path);
+    zero_alloc_example.root_module.addLibraryPath(ort_lib_path);
+
+    if (use_static) {
+        linkStaticOnnxRuntime(zero_alloc_example.root_module, ort_abseil_path, target.result.os.tag == .macos);
+    } else {
+        zero_alloc_example.root_module.linkSystemLibrary("onnxruntime", .{});
+        zero_alloc_example.root_module.addRPath(ort_lib_path);
+    }
+    zero_alloc_example.root_module.link_libc = true;
+
+    if (target.result.os.tag == .macos) {
+        zero_alloc_example.root_module.linkFramework("Foundation", .{});
+    }
+
+    b.installArtifact(zero_alloc_example);
+
+    const run_zero_alloc = b.addRunArtifact(zero_alloc_example);
+    run_zero_alloc.step.dependOn(b.getInstallStep());
+
+    if (b.args) |args| {
+        run_zero_alloc.addArgs(args);
+    }
+
+    const run_zero_alloc_step = b.step("run-zero-alloc", "Run the zero-allocation inference example");
+    run_zero_alloc_step.dependOn(&run_zero_alloc.step);
+
+    // -------------------------------------------------------------------------
+    // Example: Benchmark (compares both approaches)
+    // -------------------------------------------------------------------------
+    const benchmark = b.addExecutable(.{
+        .name = "benchmark",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/benchmark.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+            .imports = &.{
+                .{ .name = "onnxruntime", .module = ort_mod },
+            },
+        }),
+    });
+    benchmark.root_module.addIncludePath(ort_include_path);
+    benchmark.root_module.addLibraryPath(ort_lib_path);
+
+    if (use_static) {
+        linkStaticOnnxRuntime(benchmark.root_module, ort_abseil_path, target.result.os.tag == .macos);
+    } else {
+        benchmark.root_module.linkSystemLibrary("onnxruntime", .{});
+        benchmark.root_module.addRPath(ort_lib_path);
+    }
+    benchmark.root_module.link_libc = true;
+
+    if (target.result.os.tag == .macos) {
+        benchmark.root_module.linkFramework("Foundation", .{});
+    }
+
+    b.installArtifact(benchmark);
+
+    const run_benchmark = b.addRunArtifact(benchmark);
+    run_benchmark.step.dependOn(b.getInstallStep());
+
+    if (b.args) |args| {
+        run_benchmark.addArgs(args);
+    }
+
+    const run_benchmark_step = b.step("run-benchmark", "Run performance benchmark");
+    run_benchmark_step.dependOn(&run_benchmark.step);
+
+    // -------------------------------------------------------------------------
     // Check (for ZLS)
     // -------------------------------------------------------------------------
     const check = b.addTest(.{
