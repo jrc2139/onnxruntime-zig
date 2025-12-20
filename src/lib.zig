@@ -58,6 +58,14 @@ pub const IoBinding = @import("io_binding.zig").IoBinding;
 pub const RunOptions = @import("run_options.zig").RunOptions;
 pub const MemoryInfo = @import("memory_info.zig").MemoryInfo;
 
+// Execution providers
+const provider = @import("provider.zig");
+pub const ExecutionProvider = provider.ExecutionProvider;
+pub const CoreMLOptions = provider.CoreMLOptions;
+pub const CoreMLComputeUnits = provider.CoreMLComputeUnits;
+pub const CoreMLModelFormat = provider.CoreMLModelFormat;
+pub const CUDAOptions = provider.CUDAOptions;
+
 // Re-export commonly used types from c_api
 pub const OrtError = errors.OrtError;
 pub const TensorElementType = c_api.TensorElementType;

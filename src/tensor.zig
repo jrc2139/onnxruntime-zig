@@ -5,6 +5,7 @@
 const std = @import("std");
 const c_api = @import("c_api.zig");
 const errors = @import("errors.zig");
+const MemoryInfo = @import("memory_info.zig").MemoryInfo;
 
 const OrtError = errors.OrtError;
 
@@ -42,6 +43,38 @@ pub const Tensor = struct {
         var value: ?*c_api.OrtValue = null;
         status = api.CreateTensorWithDataAsOrtValue.?(
             memory_info.?,
+            @ptrCast(data.ptr),
+            data.len * @sizeOf(T),
+            shape.ptr,
+            shape.len,
+            element_type.toC(),
+            &value,
+        );
+        try errors.checkStatus(api, status);
+
+        return Self{
+            .ptr = value.?,
+            .api = api,
+            .owns_data = false,
+        };
+    }
+
+    /// Create a tensor from a slice using existing MemoryInfo
+    ///
+    /// This is more efficient when creating many tensors, as it reuses the MemoryInfo.
+    /// The data and memory_info must remain valid for the lifetime of the tensor.
+    pub fn fromSliceWithMemoryInfo(
+        comptime T: type,
+        api: *const c_api.OrtApi,
+        data: []T,
+        shape: []const i64,
+        memory_info: MemoryInfo,
+    ) OrtError!Self {
+        const element_type = comptime zigTypeToOnnx(T);
+
+        var value: ?*c_api.OrtValue = null;
+        const status = api.CreateTensorWithDataAsOrtValue.?(
+            memory_info.getPtr(),
             @ptrCast(data.ptr),
             data.len * @sizeOf(T),
             shape.ptr,

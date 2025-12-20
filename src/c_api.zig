@@ -104,6 +104,35 @@ pub const ErrorCode = enum(c_int) {
     ep_fail = c.ORT_EP_FAIL,
 };
 
+// =============================================================================
+// Execution Provider Support
+// =============================================================================
+
+/// CoreML execution provider flags (macOS only)
+pub const CoreMLFlags = struct {
+    pub const NONE: u32 = 0x000;
+    pub const USE_CPU_ONLY: u32 = 0x001;
+    pub const ENABLE_ON_SUBGRAPH: u32 = 0x002;
+    pub const ONLY_ENABLE_DEVICE_WITH_ANE: u32 = 0x004;
+    pub const ONLY_ALLOW_STATIC_INPUT_SHAPES: u32 = 0x008;
+    pub const CREATE_MLPROGRAM: u32 = 0x010;
+    pub const USE_CPU_AND_GPU: u32 = 0x020;
+};
+
+/// Append CoreML execution provider to session options (macOS only)
+/// Returns null on success, OrtStatus on failure
+pub extern fn OrtSessionOptionsAppendExecutionProvider_CoreML(
+    options: *OrtSessionOptions,
+    coreml_flags: u32,
+) ?*OrtStatus;
+
+/// Append CUDA execution provider to session options
+/// Returns null on success, OrtStatus on failure
+pub extern fn OrtSessionOptionsAppendExecutionProvider_CUDA(
+    options: *OrtSessionOptions,
+    device_id: c_int,
+) ?*OrtStatus;
+
 test "can get API" {
     const api = getApi();
     try @import("std").testing.expect(api != null);
