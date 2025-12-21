@@ -18,19 +18,23 @@ pub fn build(b: *std.Build) void {
     const build_options_mod = options.createModule();
 
     // -------------------------------------------------------------------------
-    // ONNX Runtime paths
+    // ONNX Runtime paths - configurable via build option, defaults to ~/.local/share/onnxruntime
     // -------------------------------------------------------------------------
-    const ort_include_path = if (use_static)
-        b.path("deps/onnxruntime-static/include")
-    else
-        b.path("deps/onnxruntime/include");
+    const home = std.posix.getenv("HOME") orelse "/tmp";
+    const default_ort_dir = b.fmt("{s}/.local/share/onnxruntime", .{home});
+    const ort_dir = b.option([]const u8, "ort_path", "Path to ONNX Runtime installation") orelse default_ort_dir;
 
-    const ort_lib_path = if (use_static)
-        b.path("deps/onnxruntime-static/lib")
+    const ort_include_path: std.Build.LazyPath = if (use_static)
+        .{ .cwd_relative = b.fmt("{s}-static/include", .{ort_dir}) }
     else
-        b.path("deps/onnxruntime/lib");
+        .{ .cwd_relative = b.fmt("{s}/include", .{ort_dir}) };
 
-    const ort_abseil_path = b.path("deps/onnxruntime-static/lib/abseil");
+    const ort_lib_path: std.Build.LazyPath = if (use_static)
+        .{ .cwd_relative = b.fmt("{s}-static/lib", .{ort_dir}) }
+    else
+        .{ .cwd_relative = b.fmt("{s}/lib", .{ort_dir}) };
+
+    const ort_abseil_path: std.Build.LazyPath = .{ .cwd_relative = b.fmt("{s}-static/lib/abseil", .{ort_dir}) };
 
     // -------------------------------------------------------------------------
     // Library Module (internal use for examples/tests)
