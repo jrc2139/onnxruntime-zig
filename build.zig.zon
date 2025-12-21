@@ -7,8 +7,7 @@
         "build.zig",
         "build.zig.zon",
         "src",
-        "examples",
+        "deps",
     },
-    // Dependencies managed by zigmod - keep empty to avoid conflicts
     .dependencies = .{},
 }

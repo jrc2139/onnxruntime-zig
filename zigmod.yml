@@ -1,6 +1,0 @@
-id: uyctouesdcjixx6he8n0jia4lrox9spki6pxa132hfw45jeb
-name: onnxruntime-zig
-main: src/lib.zig
-license: MIT
-description: onnxruntime for zig
-dependencies:

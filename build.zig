@@ -4,8 +4,18 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Build option for static linking
+    // Build options (can be passed from parent project)
     const use_static = b.option(bool, "static", "Link against static ONNX Runtime libraries") orelse false;
+    const cuda_enabled = b.option(bool, "cuda_enabled", "Enable CUDA support") orelse false;
+    const coreml_enabled = b.option(bool, "coreml_enabled", "Enable CoreML support") orelse true;
+    const dynamic_ort = b.option(bool, "dynamic_ort", "Load ONNX Runtime dynamically at runtime") orelse false;
+
+    // Create build_options module
+    const options = b.addOptions();
+    options.addOption(bool, "cuda_enabled", cuda_enabled);
+    options.addOption(bool, "coreml_enabled", coreml_enabled);
+    options.addOption(bool, "dynamic_ort", dynamic_ort);
+    const build_options_mod = options.createModule();
 
     // -------------------------------------------------------------------------
     // ONNX Runtime paths
@@ -23,12 +33,15 @@ pub fn build(b: *std.Build) void {
     const ort_abseil_path = b.path("deps/onnxruntime-static/lib/abseil");
 
     // -------------------------------------------------------------------------
-    // Library Module
+    // Library Module (internal use for examples/tests)
     // -------------------------------------------------------------------------
     const ort_mod = b.createModule(.{
         .root_source_file = b.path("src/lib.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{ .name = "build_options", .module = build_options_mod },
+        },
     });
 
     // Add ONNX Runtime include path for @cImport
@@ -39,7 +52,7 @@ pub fn build(b: *std.Build) void {
 
     if (use_static) {
         linkStaticOnnxRuntime(ort_mod, ort_abseil_path, target.result.os.tag == .macos);
-    } else {
+    } else if (!dynamic_ort) {
         ort_mod.linkSystemLibrary("onnxruntime", .{});
     }
 
@@ -48,15 +61,23 @@ pub fn build(b: *std.Build) void {
     // For macOS: link required frameworks
     if (target.result.os.tag == .macos) {
         ort_mod.linkFramework("Foundation", .{});
-        ort_mod.linkFramework("CoreML", .{});
+        if (coreml_enabled) {
+            ort_mod.linkFramework("CoreML", .{});
+        }
     }
 
-    // Export the module for other packages
-    _ = b.addModule("onnxruntime", .{
+    // -------------------------------------------------------------------------
+    // Export module for other packages (with build_options)
+    // -------------------------------------------------------------------------
+    const exported_mod = b.addModule("onnxruntime", .{
         .root_source_file = b.path("src/lib.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{ .name = "build_options", .module = build_options_mod },
+        },
     });
+    exported_mod.addIncludePath(ort_include_path);
 
     // -------------------------------------------------------------------------
     // Tests
@@ -66,6 +87,9 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/lib.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{ .name = "build_options", .module = build_options_mod },
+            },
         }),
     });
     lib_tests.root_module.addIncludePath(ort_include_path);
@@ -73,7 +97,7 @@ pub fn build(b: *std.Build) void {
 
     if (use_static) {
         linkStaticOnnxRuntime(lib_tests.root_module, ort_abseil_path, target.result.os.tag == .macos);
-    } else {
+    } else if (!dynamic_ort) {
         lib_tests.root_module.linkSystemLibrary("onnxruntime", .{});
         lib_tests.root_module.addRPath(ort_lib_path);
     }
@@ -260,6 +284,9 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/lib.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{ .name = "build_options", .module = build_options_mod },
+            },
         }),
     });
     check.root_module.addIncludePath(ort_include_path);
