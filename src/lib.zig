@@ -45,22 +45,41 @@ const std = @import("std");
 pub const c_api = @import("c_api.zig");
 pub const errors = @import("errors.zig");
 
-pub const Environment = @import("env.zig").Environment;
-pub const Session = @import("session.zig").Session;
-pub const SessionOptions = @import("session.zig").SessionOptions;
-pub const GraphOptLevel = @import("session.zig").GraphOptLevel;
+// Default types (backward compatible)
+const env_mod = @import("env.zig");
+const session_mod = @import("session.zig");
+const tensor_mod = @import("tensor.zig");
+const io_binding_mod = @import("io_binding.zig");
+const run_options_mod = @import("run_options.zig");
+const memory_info_mod = @import("memory_info.zig");
+
+pub const Environment = env_mod.DefaultEnvironment;
+pub const Session = session_mod.DefaultSession;
+pub const SessionOptions = session_mod.DefaultSessionOptions;
+pub const GraphOptLevel = session_mod.GraphOptLevel;
 pub const AsyncCallback = Session.AsyncCallback;
 pub const AsyncResult = Session.AsyncResult;
-pub const Tensor = @import("tensor.zig").Tensor;
+pub const Tensor = tensor_mod.DefaultTensor;
 
 // Zero-allocation inference API
-pub const IoBinding = @import("io_binding.zig").IoBinding;
-pub const RunOptions = @import("run_options.zig").RunOptions;
-pub const MemoryInfo = @import("memory_info.zig").MemoryInfo;
+pub const IoBinding = io_binding_mod.DefaultIoBinding;
+pub const RunOptions = run_options_mod.DefaultRunOptions;
+pub const MemoryInfo = memory_info_mod.DefaultMemoryInfo;
+
+// Generic factories for custom c_api modules
+pub const GenericEnvironment = env_mod.Environment;
+pub const GenericSession = session_mod.Session;
+pub const GenericSessionOptions = session_mod.SessionOptions;
+pub const GenericTensor = tensor_mod.Tensor;
+pub const GenericIoBinding = io_binding_mod.IoBinding;
+pub const GenericRunOptions = run_options_mod.RunOptions;
+pub const GenericMemoryInfo = memory_info_mod.MemoryInfo;
+pub const GenericErrors = errors.Errors;
 
 // Execution providers
 const provider = @import("provider.zig");
-pub const ExecutionProvider = provider.ExecutionProvider;
+pub const ExecutionProvider = provider.DefaultExecutionProvider;
+pub const GenericExecutionProvider = provider.ExecutionProvider;
 pub const CoreMLOptions = provider.CoreMLOptions;
 pub const CoreMLComputeUnits = provider.CoreMLComputeUnits;
 pub const CoreMLModelFormat = provider.CoreMLModelFormat;
@@ -70,6 +89,60 @@ pub const CUDAOptions = provider.CUDAOptions;
 pub const OrtError = errors.OrtError;
 pub const TensorElementType = c_api.TensorElementType;
 pub const LoggingLevel = c_api.LoggingLevel;
+
+/// Convenience helper: create all types for a custom c_api module.
+///
+/// This enables fastembed-zig (or any consumer with a custom c_api) to use
+/// onnxruntime-zig's implementation with their own c_api module:
+///
+/// ```zig
+/// const ort = @import("onnxruntime");
+/// const my_c_api = @import("my_c_api.zig");  // with dynamic loading
+///
+/// // Use onnxruntime-zig's implementation with custom c_api
+/// const ORT = ort.OnnxRuntime(my_c_api);
+/// var env = try ORT.Environment.init(.{});
+/// var session = try ORT.Session.init(env, "model.onnx", null, allocator);
+/// ```
+pub fn OnnxRuntime(comptime CApi: type) type {
+    return struct {
+        /// The c_api module this was instantiated with
+        pub const c_api_module = CApi;
+
+        /// Environment holds global state for ONNX Runtime
+        pub const Environment = GenericEnvironment(CApi);
+
+        /// Session represents a loaded model
+        pub const Session = GenericSession(CApi);
+
+        /// SessionOptions configures session behavior
+        pub const SessionOptions = GenericSessionOptions(CApi);
+
+        /// Tensor wraps OrtValue for input/output data
+        pub const Tensor = GenericTensor(CApi);
+
+        /// IoBinding enables zero-allocation inference
+        pub const IoBinding = GenericIoBinding(CApi);
+
+        /// RunOptions configures individual inference runs
+        pub const RunOptions = GenericRunOptions(CApi);
+
+        /// MemoryInfo describes memory allocation location
+        pub const MemoryInfo = GenericMemoryInfo(CApi);
+
+        /// ExecutionProvider selects hardware acceleration
+        pub const ExecutionProvider = GenericExecutionProvider(CApi);
+
+        /// Error handling utilities
+        pub const Errors = GenericErrors(CApi);
+
+        /// Async callback type for async inference
+        pub const AsyncCallback = @This().Session.AsyncCallback;
+
+        /// Async result type for async inference
+        pub const AsyncResult = @This().Session.AsyncResult;
+    };
+}
 
 /// Get the ONNX Runtime API version
 pub fn getApiVersion() u32 {

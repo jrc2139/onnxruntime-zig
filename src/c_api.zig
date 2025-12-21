@@ -43,6 +43,27 @@ pub const ExecutionMode = c.ExecutionMode;
 // Constants
 pub const ORT_API_VERSION = c.ORT_API_VERSION;
 
+// Error codes (for generic c_api compatibility)
+pub const ORT_OK = c.ORT_OK;
+pub const ORT_FAIL = c.ORT_FAIL;
+pub const ORT_INVALID_ARGUMENT = c.ORT_INVALID_ARGUMENT;
+pub const ORT_NO_SUCHFILE = c.ORT_NO_SUCHFILE;
+pub const ORT_NO_MODEL = c.ORT_NO_MODEL;
+pub const ORT_ENGINE_ERROR = c.ORT_ENGINE_ERROR;
+pub const ORT_RUNTIME_EXCEPTION = c.ORT_RUNTIME_EXCEPTION;
+pub const ORT_INVALID_PROTOBUF = c.ORT_INVALID_PROTOBUF;
+pub const ORT_MODEL_LOADED = c.ORT_MODEL_LOADED;
+pub const ORT_NOT_IMPLEMENTED = c.ORT_NOT_IMPLEMENTED;
+pub const ORT_INVALID_GRAPH = c.ORT_INVALID_GRAPH;
+pub const ORT_EP_FAIL = c.ORT_EP_FAIL;
+
+// Memory allocator types (for generic c_api compatibility)
+pub const OrtArenaAllocator = c.OrtArenaAllocator;
+pub const OrtDeviceAllocator = c.OrtDeviceAllocator;
+pub const OrtMemTypeDefault = c.OrtMemTypeDefault;
+pub const OrtMemTypeCPUInput = c.OrtMemTypeCPUInput;
+pub const OrtMemTypeCPUOutput = c.OrtMemTypeCPUOutput;
+
 /// Get the ONNX Runtime API base
 pub fn getApiBase() *const OrtApiBase {
     return c.OrtGetApiBase();

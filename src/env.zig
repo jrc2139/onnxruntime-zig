@@ -2,81 +2,108 @@
 //!
 //! The Environment holds the global state for ONNX Runtime.
 //! It should be created once and used for all sessions.
+//! Supports generic c_api modules via the Environment(CApi) factory.
 
 const std = @import("std");
-const c_api = @import("c_api.zig");
-const errors = @import("errors.zig");
+const default_c_api = @import("c_api.zig");
+const errors_mod = @import("errors.zig");
 
-const OrtError = errors.OrtError;
+const OrtError = errors_mod.OrtError;
 
-/// ONNX Runtime Environment
-///
-/// The environment maintains the global threadpool and other resources.
-/// Create one environment per application and reuse it for all sessions.
-pub const Environment = struct {
-    ptr: *c_api.OrtEnv,
-    api: *const c_api.OrtApi,
+/// Generic Environment factory for any c_api module
+pub fn Environment(comptime CApi: type) type {
+    const Errs = errors_mod.Errors(CApi);
 
-    const Self = @This();
+    return struct {
+        ptr: *CApi.OrtEnv,
+        api: *const CApi.OrtApi,
 
-    /// Initialize options for creating an environment
-    pub const InitOptions = struct {
-        /// Logging severity level
-        log_level: c_api.LoggingLevel = .warning,
-        /// Logger identifier (appears in log messages)
-        log_id: [:0]const u8 = "onnxruntime-zig",
-    };
+        const Self = @This();
 
-    /// Create a new ONNX Runtime environment
-    pub fn init(options: InitOptions) (OrtError || error{ApiNotAvailable})!Self {
-        const api = c_api.getApi() orelse return error.ApiNotAvailable;
-
-        var env: ?*c_api.OrtEnv = null;
-        const status = api.CreateEnv.?(
-            options.log_level.toC(),
-            options.log_id.ptr,
-            &env,
-        );
-
-        try errors.checkStatus(api, status);
-
-        return Self{
-            .ptr = env.?,
-            .api = api,
+        /// Initialize options for creating an environment
+        pub const InitOptions = struct {
+            /// Logging severity level
+            log_level: CApi.LoggingLevel = .warning,
+            /// Logger identifier (appears in log messages)
+            log_id: [:0]const u8 = "onnxruntime-zig",
         };
-    }
 
-    /// Release the environment
-    pub fn deinit(self: *Self) void {
-        self.api.ReleaseEnv.?(self.ptr);
-        self.ptr = undefined;
-    }
+        /// Create a new ONNX Runtime environment
+        pub fn init(options: InitOptions) (OrtError || error{ApiNotAvailable})!Self {
+            const api = CApi.getApi() orelse return error.ApiNotAvailable;
 
-    /// Get the underlying OrtApi pointer
-    pub fn getApi(self: Self) *const c_api.OrtApi {
-        return self.api;
-    }
+            var env: ?*CApi.OrtEnv = null;
+            const status = api.CreateEnv.?(
+                options.log_level.toC(),
+                options.log_id.ptr,
+                &env,
+            );
 
-    /// Get the underlying OrtEnv pointer
-    pub fn getPtr(self: Self) *c_api.OrtEnv {
-        return self.ptr;
-    }
+            try Errs.checkStatus(api, status);
 
-    /// Enable telemetry collection
-    pub fn enableTelemetry(self: Self) OrtError!void {
-        const status = self.api.EnableTelemetryEvents.?(self.ptr);
-        try errors.checkStatus(self.api, status);
-    }
+            return Self{
+                .ptr = env.?,
+                .api = api,
+            };
+        }
 
-    /// Disable telemetry collection
-    pub fn disableTelemetry(self: Self) OrtError!void {
-        const status = self.api.DisableTelemetryEvents.?(self.ptr);
-        try errors.checkStatus(self.api, status);
-    }
-};
+        /// Create environment with pre-obtained API pointer
+        /// Use this when you already have the API from another source
+        pub fn initWithApi(api: *const CApi.OrtApi, options: InitOptions) OrtError!Self {
+            var env: ?*CApi.OrtEnv = null;
+            const status = api.CreateEnv.?(
+                options.log_level.toC(),
+                options.log_id.ptr,
+                &env,
+            );
+
+            try Errs.checkStatus(api, status);
+
+            return Self{
+                .ptr = env.?,
+                .api = api,
+            };
+        }
+
+        /// Release the environment
+        pub fn deinit(self: *Self) void {
+            self.api.ReleaseEnv.?(self.ptr);
+            self.ptr = undefined;
+        }
+
+        /// Get the underlying OrtApi pointer
+        pub fn getApi(self: Self) *const CApi.OrtApi {
+            return self.api;
+        }
+
+        /// Get the underlying OrtEnv pointer
+        pub fn getPtr(self: Self) *CApi.OrtEnv {
+            return self.ptr;
+        }
+
+        /// Enable telemetry collection
+        pub fn enableTelemetry(self: Self) OrtError!void {
+            const status = self.api.EnableTelemetryEvents.?(self.ptr);
+            try Errs.checkStatus(self.api, status);
+        }
+
+        /// Disable telemetry collection
+        pub fn disableTelemetry(self: Self) OrtError!void {
+            const status = self.api.DisableTelemetryEvents.?(self.ptr);
+            try Errs.checkStatus(self.api, status);
+        }
+    };
+}
+
+// =============================================================================
+// Backward-compatible exports using default c_api
+// =============================================================================
+
+/// Default Environment type using built-in c_api (backward compatible)
+pub const DefaultEnvironment = Environment(default_c_api);
 
 test "create and destroy environment" {
-    var env = try Environment.init(.{});
+    var env = try DefaultEnvironment.init(.{});
     defer env.deinit();
 
     // Environment pointer should not be null
@@ -84,7 +111,7 @@ test "create and destroy environment" {
 }
 
 test "environment with custom log level" {
-    var env = try Environment.init(.{
+    var env = try DefaultEnvironment.init(.{
         .log_level = .info,
         .log_id = "test-env",
     });

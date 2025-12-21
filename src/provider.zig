@@ -2,13 +2,14 @@
 //!
 //! Provides configurable execution providers (CPU, CoreML, CUDA) with
 //! automatic platform detection.
+//! Supports generic c_api modules via the ExecutionProvider(CApi) factory.
 
 const std = @import("std");
 const builtin = @import("builtin");
-const c_api = @import("c_api.zig");
-const errors = @import("errors.zig");
+const default_c_api = @import("c_api.zig");
+const errors_mod = @import("errors.zig");
 
-const OrtError = errors.OrtError;
+const OrtError = errors_mod.OrtError;
 
 /// CoreML compute units for hardware selection
 pub const CoreMLComputeUnits = enum {
@@ -48,158 +49,169 @@ pub const CUDAOptions = struct {
     device_id: u32 = 0,
 };
 
-/// Execution provider type
-pub const ExecutionProvider = union(enum) {
-    /// CPU execution (default, works everywhere)
-    cpu: void,
-    /// CoreML execution (macOS only, uses Neural Engine + Metal GPU)
-    coreml: CoreMLOptions,
-    /// CUDA execution (NVIDIA GPU)
-    cuda: CUDAOptions,
-    /// Auto-detect best provider for platform
-    auto: void,
+/// Generic ExecutionProvider factory for any c_api module
+pub fn ExecutionProvider(comptime CApi: type) type {
+    return union(enum) {
+        /// CPU execution (default, works everywhere)
+        cpu: void,
+        /// CoreML execution (macOS only, uses Neural Engine + Metal GPU)
+        coreml: CoreMLOptions,
+        /// CUDA execution (NVIDIA GPU)
+        cuda: CUDAOptions,
+        /// Auto-detect best provider for platform
+        auto: void,
 
-    /// Default CPU provider
-    pub fn cpuProvider() ExecutionProvider {
-        return .{ .cpu = {} };
-    }
+        const Self = @This();
 
-    /// CoreML provider with safe defaults (precision-focused)
-    pub fn coremlProvider() ExecutionProvider {
-        return .{ .coreml = .{} };
-    }
-
-    /// CoreML provider with custom options
-    pub fn coremlWithOptions(opts: CoreMLOptions) ExecutionProvider {
-        return .{ .coreml = opts };
-    }
-
-    /// CoreML with CPU only (for debugging precision issues)
-    pub fn coremlSafe() ExecutionProvider {
-        return .{ .coreml = .{ .compute_units = .cpu_only } };
-    }
-
-    /// CoreML with all compute units (maximum performance)
-    pub fn coremlPerformance() ExecutionProvider {
-        return .{ .coreml = .{ .compute_units = .all } };
-    }
-
-    /// CUDA provider with device ID
-    pub fn cudaWithDevice(device_id: u32) ExecutionProvider {
-        return .{ .cuda = .{ .device_id = device_id } };
-    }
-
-    /// CUDA provider with default device (0)
-    pub fn cudaProvider() ExecutionProvider {
-        return .{ .cuda = .{} };
-    }
-
-    /// Auto-detect best provider
-    pub fn autoProvider() ExecutionProvider {
-        return .{ .auto = {} };
-    }
-
-    /// Get the display name for this provider
-    pub fn getName(self: ExecutionProvider) []const u8 {
-        return switch (self) {
-            .cpu => "CPU",
-            .coreml => |opts| switch (opts.compute_units) {
-                .all => "CoreML:All",
-                .cpu_only => "CoreML:CPUOnly",
-                .cpu_and_gpu => "CoreML:CPU+GPU",
-                .cpu_and_neural_engine => "CoreML:CPU+ANE",
-            },
-            .cuda => "CUDA",
-            .auto => "Auto",
-        };
-    }
-
-    /// Apply this provider to session options
-    pub fn apply(self: ExecutionProvider, session_options: *c_api.OrtSessionOptions) OrtError!void {
-        const api = c_api.getApi() orelse return OrtError.ApiUnavailable;
-        const resolved = self.resolve();
-
-        switch (resolved) {
-            .cpu => {
-                // CPU is the default, nothing to configure
-            },
-            .coreml => |coreml_opts| {
-                // CoreML is only available on macOS
-                if (comptime builtin.os.tag != .macos) {
-                    return OrtError.InvalidArgument;
-                }
-
-                // Build CoreML flags
-                var flags: u32 = 0;
-
-                // Model format
-                if (coreml_opts.model_format == .ml_program) {
-                    flags |= c_api.CoreMLFlags.CREATE_MLPROGRAM;
-                }
-
-                // Compute units
-                switch (coreml_opts.compute_units) {
-                    .cpu_only => flags |= c_api.CoreMLFlags.USE_CPU_ONLY,
-                    .cpu_and_gpu => flags |= c_api.CoreMLFlags.USE_CPU_AND_GPU,
-                    .cpu_and_neural_engine => {
-                        // Default behavior uses CPU + ANE when available
-                    },
-                    .all => {
-                        // Use everything available
-                    },
-                }
-
-                // Static shapes can improve performance
-                if (coreml_opts.require_static_input_shapes) {
-                    flags |= c_api.CoreMLFlags.ONLY_ALLOW_STATIC_INPUT_SHAPES;
-                }
-
-                const status = c_api.OrtSessionOptionsAppendExecutionProvider_CoreML(session_options, flags);
-                if (status) |s| {
-                    api.ReleaseStatus.?(s);
-                    return OrtError.EngineError;
-                }
-            },
-            .cuda => |cuda_opts| {
-                const status = c_api.OrtSessionOptionsAppendExecutionProvider_CUDA(
-                    session_options,
-                    @intCast(cuda_opts.device_id),
-                );
-                if (status) |s| {
-                    api.ReleaseStatus.?(s);
-                    return OrtError.EngineError;
-                }
-            },
-            .auto => unreachable, // resolve() handles auto
-        }
-    }
-
-    /// Resolve auto provider to concrete provider
-    pub fn resolve(self: ExecutionProvider) ExecutionProvider {
-        if (self != .auto) return self;
-
-        // Platform-specific auto-detection
-        if (comptime builtin.os.tag == .macos) {
-            // On macOS, use CoreML
-            return ExecutionProvider.coremlProvider();
+        /// Default CPU provider
+        pub fn cpuProvider() Self {
+            return .{ .cpu = {} };
         }
 
-        // Fall back to CPU
-        return ExecutionProvider.cpuProvider();
-    }
-};
+        /// CoreML provider with safe defaults (precision-focused)
+        pub fn coremlProvider() Self {
+            return .{ .coreml = .{} };
+        }
+
+        /// CoreML provider with custom options
+        pub fn coremlWithOptions(opts: CoreMLOptions) Self {
+            return .{ .coreml = opts };
+        }
+
+        /// CoreML with CPU only (for debugging precision issues)
+        pub fn coremlSafe() Self {
+            return .{ .coreml = .{ .compute_units = .cpu_only } };
+        }
+
+        /// CoreML with all compute units (maximum performance)
+        pub fn coremlPerformance() Self {
+            return .{ .coreml = .{ .compute_units = .all } };
+        }
+
+        /// CUDA provider with device ID
+        pub fn cudaWithDevice(device_id: u32) Self {
+            return .{ .cuda = .{ .device_id = device_id } };
+        }
+
+        /// CUDA provider with default device (0)
+        pub fn cudaProvider() Self {
+            return .{ .cuda = .{} };
+        }
+
+        /// Auto-detect best provider
+        pub fn autoProvider() Self {
+            return .{ .auto = {} };
+        }
+
+        /// Get the display name for this provider
+        pub fn getName(self: Self) []const u8 {
+            return switch (self) {
+                .cpu => "CPU",
+                .coreml => |opts| switch (opts.compute_units) {
+                    .all => "CoreML:All",
+                    .cpu_only => "CoreML:CPUOnly",
+                    .cpu_and_gpu => "CoreML:CPU+GPU",
+                    .cpu_and_neural_engine => "CoreML:CPU+ANE",
+                },
+                .cuda => "CUDA",
+                .auto => "Auto",
+            };
+        }
+
+        /// Apply this provider to session options
+        pub fn apply(self: Self, session_options: *CApi.OrtSessionOptions) OrtError!void {
+            const api = CApi.getApi() orelse return OrtError.ApiNotAvailable;
+            const resolved = self.resolve();
+
+            switch (resolved) {
+                .cpu => {
+                    // CPU is the default, nothing to configure
+                },
+                .coreml => |coreml_opts| {
+                    // CoreML is only available on macOS
+                    if (comptime builtin.os.tag != .macos) {
+                        return OrtError.InvalidArgument;
+                    }
+
+                    // Build CoreML flags
+                    var flags: u32 = 0;
+
+                    // Model format
+                    if (coreml_opts.model_format == .ml_program) {
+                        flags |= CApi.CoreMLFlags.CREATE_MLPROGRAM;
+                    }
+
+                    // Compute units
+                    switch (coreml_opts.compute_units) {
+                        .cpu_only => flags |= CApi.CoreMLFlags.USE_CPU_ONLY,
+                        .cpu_and_gpu => flags |= CApi.CoreMLFlags.USE_CPU_AND_GPU,
+                        .cpu_and_neural_engine => {
+                            // Default behavior uses CPU + ANE when available
+                        },
+                        .all => {
+                            // Use everything available
+                        },
+                    }
+
+                    // Static shapes can improve performance
+                    if (coreml_opts.require_static_input_shapes) {
+                        flags |= CApi.CoreMLFlags.ONLY_ALLOW_STATIC_INPUT_SHAPES;
+                    }
+
+                    const status = CApi.OrtSessionOptionsAppendExecutionProvider_CoreML(session_options, flags);
+                    if (status) |s| {
+                        api.ReleaseStatus.?(s);
+                        return OrtError.EngineError;
+                    }
+                },
+                .cuda => |cuda_opts| {
+                    const status = CApi.OrtSessionOptionsAppendExecutionProvider_CUDA(
+                        session_options,
+                        @intCast(cuda_opts.device_id),
+                    );
+                    if (status) |s| {
+                        api.ReleaseStatus.?(s);
+                        return OrtError.EngineError;
+                    }
+                },
+                .auto => unreachable, // resolve() handles auto
+            }
+        }
+
+        /// Resolve auto provider to concrete provider
+        pub fn resolve(self: Self) Self {
+            if (self != .auto) return self;
+
+            // Platform-specific auto-detection
+            if (comptime builtin.os.tag == .macos) {
+                // On macOS, use CoreML
+                return Self.coremlProvider();
+            }
+
+            // Fall back to CPU
+            return Self.cpuProvider();
+        }
+    };
+}
+
+// =============================================================================
+// Backward-compatible exports using default c_api
+// =============================================================================
+
+/// Default ExecutionProvider type using built-in c_api (backward compatible)
+pub const DefaultExecutionProvider = ExecutionProvider(default_c_api);
 
 test "provider names" {
     const testing = std.testing;
-    try testing.expectEqualStrings("CPU", ExecutionProvider.cpuProvider().getName());
-    try testing.expectEqualStrings("CoreML:CPU+ANE", ExecutionProvider.coremlProvider().getName());
-    try testing.expectEqualStrings("CoreML:CPUOnly", ExecutionProvider.coremlSafe().getName());
-    try testing.expectEqualStrings("CoreML:All", ExecutionProvider.coremlPerformance().getName());
-    try testing.expectEqualStrings("CUDA", ExecutionProvider.cudaProvider().getName());
+    try testing.expectEqualStrings("CPU", DefaultExecutionProvider.cpuProvider().getName());
+    try testing.expectEqualStrings("CoreML:CPU+ANE", DefaultExecutionProvider.coremlProvider().getName());
+    try testing.expectEqualStrings("CoreML:CPUOnly", DefaultExecutionProvider.coremlSafe().getName());
+    try testing.expectEqualStrings("CoreML:All", DefaultExecutionProvider.coremlPerformance().getName());
+    try testing.expectEqualStrings("CUDA", DefaultExecutionProvider.cudaProvider().getName());
 }
 
 test "auto resolve" {
-    const resolved = ExecutionProvider.autoProvider().resolve();
+    const resolved = DefaultExecutionProvider.autoProvider().resolve();
     if (comptime builtin.os.tag == .macos) {
         try std.testing.expect(resolved == .coreml);
     } else {
@@ -208,9 +220,9 @@ test "auto resolve" {
 }
 
 test "resolve non-auto returns self" {
-    const cpu_provider = ExecutionProvider.cpuProvider();
+    const cpu_provider = DefaultExecutionProvider.cpuProvider();
     try std.testing.expectEqual(cpu_provider, cpu_provider.resolve());
 
-    const coreml_provider = ExecutionProvider.coremlProvider();
+    const coreml_provider = DefaultExecutionProvider.coremlProvider();
     try std.testing.expectEqual(coreml_provider, coreml_provider.resolve());
 }

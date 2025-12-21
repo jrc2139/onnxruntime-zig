@@ -2,50 +2,62 @@
 //!
 //! MemoryInfo describes where tensor data resides (CPU, GPU, etc.)
 //! Used with IoBinding for zero-copy device placement.
+//! Supports generic c_api modules via the MemoryInfo(CApi) factory.
 
 const std = @import("std");
-const c_api = @import("c_api.zig");
-const errors = @import("errors.zig");
+const default_c_api = @import("c_api.zig");
+const errors_mod = @import("errors.zig");
 
-const OrtError = errors.OrtError;
+const OrtError = errors_mod.OrtError;
 
-/// Memory information describing device and allocator type
-pub const MemoryInfo = struct {
-    ptr: *c_api.OrtMemoryInfo,
-    api: *const c_api.OrtApi,
+/// Generic MemoryInfo factory for any c_api module
+pub fn MemoryInfo(comptime CApi: type) type {
+    const Errs = errors_mod.Errors(CApi);
 
-    const Self = @This();
+    return struct {
+        ptr: *CApi.OrtMemoryInfo,
+        api: *const CApi.OrtApi,
 
-    /// Create CPU memory info with default settings
-    pub fn initCpu(api: *const c_api.OrtApi) OrtError!Self {
-        var memory_info: ?*c_api.OrtMemoryInfo = null;
-        const status = api.CreateCpuMemoryInfo.?(
-            c_api.c.OrtArenaAllocator,
-            c_api.c.OrtMemTypeDefault,
-            &memory_info,
-        );
-        try errors.checkStatus(api, status);
+        const Self = @This();
 
-        return Self{
-            .ptr = memory_info.?,
-            .api = api,
-        };
-    }
+        /// Create CPU memory info with default settings
+        pub fn initCpu(api: *const CApi.OrtApi) OrtError!Self {
+            var memory_info: ?*CApi.OrtMemoryInfo = null;
+            const status = api.CreateCpuMemoryInfo.?(
+                CApi.OrtArenaAllocator,
+                CApi.OrtMemTypeDefault,
+                &memory_info,
+            );
+            try Errs.checkStatus(api, status);
 
-    /// Release memory info
-    pub fn deinit(self: *Self) void {
-        self.api.ReleaseMemoryInfo.?(self.ptr);
-        self.ptr = undefined;
-    }
+            return Self{
+                .ptr = memory_info.?,
+                .api = api,
+            };
+        }
 
-    /// Get the underlying pointer
-    pub fn getPtr(self: Self) *c_api.OrtMemoryInfo {
-        return self.ptr;
-    }
-};
+        /// Release memory info
+        pub fn deinit(self: *Self) void {
+            self.api.ReleaseMemoryInfo.?(self.ptr);
+            self.ptr = undefined;
+        }
+
+        /// Get the underlying pointer
+        pub fn getPtr(self: Self) *CApi.OrtMemoryInfo {
+            return self.ptr;
+        }
+    };
+}
+
+// =============================================================================
+// Backward-compatible exports using default c_api
+// =============================================================================
+
+/// Default MemoryInfo type using built-in c_api (backward compatible)
+pub const DefaultMemoryInfo = MemoryInfo(default_c_api);
 
 test "MemoryInfo CPU creation" {
-    const api = c_api.getApi() orelse return error.SkipZigTest;
-    var mem_info = try MemoryInfo.initCpu(api);
+    const api = default_c_api.getApi() orelse return error.SkipZigTest;
+    var mem_info = try DefaultMemoryInfo.initCpu(api);
     defer mem_info.deinit();
 }
