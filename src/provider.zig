@@ -165,13 +165,44 @@ pub fn ExecutionProvider(comptime CApi: type) type {
                     }
                 },
                 .cuda => |cuda_opts| {
-                    const status = CApi.OrtSessionOptionsAppendExecutionProvider_CUDA(
-                        session_options,
-                        @intCast(cuda_opts.device_id),
-                    );
-                    if (status) |s| {
-                        api.ReleaseStatus.?(s);
-                        return OrtError.EngineError;
+                    // CUDA provider requires the function to be available
+                    // The function may be:
+                    // 1. An extern fn (directly callable)
+                    // 2. An optional fn pointer (null when CUDA not enabled)
+                    // 3. Not declared at all
+                    if (comptime @hasDecl(CApi, "OrtSessionOptionsAppendExecutionProvider_CUDA")) {
+                        const cuda_decl = CApi.OrtSessionOptionsAppendExecutionProvider_CUDA;
+                        const CudaDeclType = @TypeOf(cuda_decl);
+
+                        // Check if it's an optional type (pointer that could be null)
+                        if (comptime @typeInfo(CudaDeclType) == .optional) {
+                            if (cuda_decl) |cuda_fn| {
+                                const status = cuda_fn(
+                                    session_options,
+                                    @intCast(cuda_opts.device_id),
+                                );
+                                if (status) |s| {
+                                    api.ReleaseStatus.?(s);
+                                    return OrtError.EngineError;
+                                }
+                            } else {
+                                // Function is null - CUDA not available
+                                return OrtError.InvalidArgument;
+                            }
+                        } else {
+                            // Direct extern function
+                            const status = cuda_decl(
+                                session_options,
+                                @intCast(cuda_opts.device_id),
+                            );
+                            if (status) |s| {
+                                api.ReleaseStatus.?(s);
+                                return OrtError.EngineError;
+                            }
+                        }
+                    } else {
+                        // CUDA not available in this c_api
+                        return OrtError.InvalidArgument;
                     }
                 },
                 .auto => unreachable, // resolve() handles auto
