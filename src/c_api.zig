@@ -3,6 +3,8 @@
 //! This module provides direct access to the ONNX Runtime C API via @cImport.
 //! For a higher-level idiomatic Zig API, use the main `onnxruntime` module.
 
+const build_options = @import("build_options");
+
 pub const c = @cImport({
     @cInclude("onnxruntime_c_api.h");
 });
@@ -130,7 +132,8 @@ pub const ErrorCode = enum(c_int) {
 // =============================================================================
 
 /// CoreML execution provider flags (macOS only)
-pub const CoreMLFlags = struct {
+/// Only available when coreml_enabled build option is true
+pub const CoreMLFlags = if (build_options.coreml_enabled) struct {
     pub const NONE: u32 = 0x000;
     pub const USE_CPU_ONLY: u32 = 0x001;
     pub const ENABLE_ON_SUBGRAPH: u32 = 0x002;
@@ -138,14 +141,15 @@ pub const CoreMLFlags = struct {
     pub const ONLY_ALLOW_STATIC_INPUT_SHAPES: u32 = 0x008;
     pub const CREATE_MLPROGRAM: u32 = 0x010;
     pub const USE_CPU_AND_GPU: u32 = 0x020;
-};
+} else struct {};
 
 /// Append CoreML execution provider to session options (macOS only)
 /// Returns null on success, OrtStatus on failure
-pub extern fn OrtSessionOptionsAppendExecutionProvider_CoreML(
-    options: *OrtSessionOptions,
-    coreml_flags: u32,
-) ?*OrtStatus;
+/// Only available when coreml_enabled build option is true
+pub const OrtSessionOptionsAppendExecutionProvider_CoreML = if (build_options.coreml_enabled)
+    @extern(*const fn (options: *OrtSessionOptions, coreml_flags: u32) callconv(.c) ?*OrtStatus, .{ .name = "OrtSessionOptionsAppendExecutionProvider_CoreML" })
+else
+    @as(?*const anyopaque, null);
 
 /// Append CUDA execution provider to session options
 /// Returns null on success, OrtStatus on failure

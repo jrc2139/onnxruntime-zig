@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 const default_c_api = @import("c_api.zig");
 const errors_mod = @import("errors.zig");
 
@@ -128,40 +129,42 @@ pub fn ExecutionProvider(comptime CApi: type) type {
                     // CPU is the default, nothing to configure
                 },
                 .coreml => |coreml_opts| {
-                    // CoreML is only available on macOS
-                    if (comptime builtin.os.tag != .macos) {
+                    // CoreML is only available on macOS and when coreml_enabled
+                    if (comptime !build_options.coreml_enabled or builtin.os.tag != .macos) {
                         return OrtError.InvalidArgument;
                     }
+                    // CoreML enabled on macOS
+                    {
+                        // Build CoreML flags
+                        var flags: u32 = 0;
 
-                    // Build CoreML flags
-                    var flags: u32 = 0;
+                        // Model format
+                        if (coreml_opts.model_format == .ml_program) {
+                            flags |= CApi.CoreMLFlags.CREATE_MLPROGRAM;
+                        }
 
-                    // Model format
-                    if (coreml_opts.model_format == .ml_program) {
-                        flags |= CApi.CoreMLFlags.CREATE_MLPROGRAM;
-                    }
+                        // Compute units
+                        switch (coreml_opts.compute_units) {
+                            .cpu_only => flags |= CApi.CoreMLFlags.USE_CPU_ONLY,
+                            .cpu_and_gpu => flags |= CApi.CoreMLFlags.USE_CPU_AND_GPU,
+                            .cpu_and_neural_engine => {
+                                // Default behavior uses CPU + ANE when available
+                            },
+                            .all => {
+                                // Use everything available
+                            },
+                        }
 
-                    // Compute units
-                    switch (coreml_opts.compute_units) {
-                        .cpu_only => flags |= CApi.CoreMLFlags.USE_CPU_ONLY,
-                        .cpu_and_gpu => flags |= CApi.CoreMLFlags.USE_CPU_AND_GPU,
-                        .cpu_and_neural_engine => {
-                            // Default behavior uses CPU + ANE when available
-                        },
-                        .all => {
-                            // Use everything available
-                        },
-                    }
+                        // Static shapes can improve performance
+                        if (coreml_opts.require_static_input_shapes) {
+                            flags |= CApi.CoreMLFlags.ONLY_ALLOW_STATIC_INPUT_SHAPES;
+                        }
 
-                    // Static shapes can improve performance
-                    if (coreml_opts.require_static_input_shapes) {
-                        flags |= CApi.CoreMLFlags.ONLY_ALLOW_STATIC_INPUT_SHAPES;
-                    }
-
-                    const status = CApi.OrtSessionOptionsAppendExecutionProvider_CoreML(session_options, flags);
-                    if (status) |s| {
-                        api.ReleaseStatus.?(s);
-                        return OrtError.EngineError;
+                        const status = CApi.OrtSessionOptionsAppendExecutionProvider_CoreML(session_options, flags);
+                        if (status) |s| {
+                            api.ReleaseStatus.?(s);
+                            return OrtError.EngineError;
+                        }
                     }
                 },
                 .cuda => |cuda_opts| {
@@ -214,8 +217,8 @@ pub fn ExecutionProvider(comptime CApi: type) type {
             if (self != .auto) return self;
 
             // Platform-specific auto-detection
-            if (comptime builtin.os.tag == .macos) {
-                // On macOS, use CoreML
+            if (comptime build_options.coreml_enabled and builtin.os.tag == .macos) {
+                // On macOS with CoreML enabled, use CoreML
                 return Self.coremlProvider();
             }
 
@@ -243,7 +246,7 @@ test "provider names" {
 
 test "auto resolve" {
     const resolved = DefaultExecutionProvider.autoProvider().resolve();
-    if (comptime builtin.os.tag == .macos) {
+    if (comptime build_options.coreml_enabled and builtin.os.tag == .macos) {
         try std.testing.expect(resolved == .coreml);
     } else {
         try std.testing.expect(resolved == .cpu);
